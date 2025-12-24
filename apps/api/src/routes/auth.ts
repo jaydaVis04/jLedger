@@ -2,8 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcrypt";
 import { prisma } from "../db/prisma";
+import signAccessToken from "../auth/tokens"
+import { generateRefreshToken, hashRefreshToken } from "../auth/refresh"
 
-const router = Router();
+const router = Router(); // in general wire, to plug into app
 
 const registerSchema = z.object({
         email:z.string().email(),
@@ -14,6 +16,7 @@ const loginSchema = z.object({
         email:z.string().email(),
         password: z.string().min(8),
 });
+
 
 router.post("/register", async (req,res) => {
     const parsed = registerSchema.safeParse(req.body);
@@ -62,12 +65,28 @@ router.post("/login", async (req, res) => {
         const ok = await bcrypt.compare(password, user.pwHash);
 
         if (ok) {
-            return res.status(200).json({ ok: true, user: { id: user.id, email: user.email } });
-        }
-        
-        return res.status(401).json({ error: "Invalid email or password!" });
+            const accessToken = signAccessToken(user.id);
 
-    }
+            const rawRefreshToken = generateRefreshToken();
+            const tokenHash = hashRefreshToken(rawRefreshToken);
+
+            const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+            const expiresAt = new Date(Date.now() + sevenDaysMs);
+
+            await prisma.refreshToken.create({
+                    data: { tokenHash, userId: user.id, expiresAt },
+            });
+
+            res.cookie("refresh_token", rawRefreshToken, {
+                httpOnly: true,
+                sameSite: "lax",
+                secure: false,
+                path: "/auth/refresh",
+                maxAge: sevenDaysMs,
+        });
+
+        return res.status(200).json({ ok: true, accessToken, user });
+}
     
     catch (err) {
         console.error("LOGIN ERROR:", err);
@@ -75,6 +94,22 @@ router.post("/login", async (req, res) => {
             return res.status(500).json({ error: "Server error!" });
        }
     
+});
+
+router.post("/refresh", async (req, res) => {
+    const readCookie = req.cookies.refresh_token;
+    if (readcookie) {
+        const hashedCookie = hashRefreshToken(readCookie) 
+
+        await prisma.refreshToken.findFirst({
+            where: { tokenHash: hashedCookie, revokedAt: null, expiresAt: { gt: new Date() } },
+        });
+
+        //cookie not found
+        return res.status(401).json({ errror: "Missing cookie"});
+    }
+
+    return res.status(401).json({ error: "Missing coookie!"});
 });
 
 export default router;
