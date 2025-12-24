@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: jledger
+      POSTGRES_PASSWORD: jledger_pw
+      POSTGRES_DB: jledger
+    ports:
+      - "5432:5432"
+    volumes:
+      - jledger_db:/var/lib/postgresql/data
+
+volumes:
+  jledger_db:
