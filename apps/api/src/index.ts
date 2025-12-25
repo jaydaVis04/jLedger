@@ -5,6 +5,13 @@ import cors from "cors"; // who controls api from browser?
 import helmet from "helmet"; // safer http headers
 import cookieParser from "cookie-parser"; // reads cookies
 import authRouter from "./routes/auth";
+import { app } from "./app";
+
+if (process.env.NODE_ENV !== "test") {
+  app.listen(port, () => {
+    console.log(`API listening on http://localhost:${port}`);
+  });
+}
 
 const app = express(); //server object. mw + routes attached
 
@@ -14,10 +21,6 @@ app.use(express.json());
 app.use(cookieParser()); // accessible cookies. needed for auth refresh flow
 app.use("/auth", authRouter);
 app.get("/health", (_req, res) => res.json({ ok: true })); // simple endpoint. debug. is api up?
-
-app.post("/echo", (req, res) => {
-    res.json({ youSent: req.body });
-});
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 app.post("/dev/create-user", async (req, res) => {
