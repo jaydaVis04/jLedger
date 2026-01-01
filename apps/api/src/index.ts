@@ -7,12 +7,6 @@ import cookieParser from "cookie-parser"; // reads cookies
 import authRouter from "./routes/auth";
 import { app } from "./app";
 
-if (process.env.NODE_ENV !== "test") {
-  app.listen(port, () => {
-    console.log(`API listening on http://localhost:${port}`);
-  });
-}
-
 const app = express(); //server object. mw + routes attached
 
 app.use(helmet()); // safe http headers
@@ -41,5 +35,11 @@ app.post("/dev/create-user", async (req, res) => {
         return res.status(400).json({ error: err?.message ?? "Created failed" });
     }
 });
+
+if (process.env.NODE_ENV !== "test") {
+    app.listen(port, () => {
+    console.log(`API listening on http://localhost:${port}`);
+  });
+}
 
 app.listen(port, () => console.log(`API listening on http://localhost:${port}`));

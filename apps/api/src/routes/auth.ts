@@ -156,7 +156,86 @@ router.get("/me", requireAuth, async (req, res) => {
 });
 
 router.get("/admin/ping", requireAuth, requireRole("ADMIN"), (req, res) => {
-    res.json({ ok: true })
+    res.json({ ok: true });
 });
 
+router.post("/ledger", requireAuth, async (req, res) => {
+    if (!req.body.name) {
+        return res.status(400).json({ error: "Missing body input!" });
+    }
+    try {
+        const ledger = await prisma.ledger.create({
+            data: { name: req.body.name, userId: req.userId },
+        });
+
+        return res.status(201).json(ledger);
+
+    } catch (err: any) {
+        if (err.code === "P2002") {
+            return res.status(409).json({ error: "This already exists in your ledgers!" });
+        } else {
+
+            return res.status(500).json({ error: "Server error." });
+
+        }
+    }
+
+});
+
+router.get("/ledgers", requireAuth, async (req, res) => {
+    const myLedgers = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { ledgers: true },
+    });
+
+    if (myLedgers == null) {
+        return res.status(401).json({ error: "Unauthorized!" });
+    }
+
+    return res.status(200).json(myLedgers.ledgers);
+
+});
+
+router.post("/ledgers/:id/select", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const ledgerId = req.params.id;
+
+  if (!ledgerId) {
+    return res.status(400).json({ error: "Missing ledger id." });
+  }
+
+  // 1) verify ledger belongs to this user
+  const ledger = await prisma.ledger.findFirst({
+    where: { id: ledgerId, userId },
+    select: { id: true },
+  });
+
+  if (!ledger) {
+    // either doesn't exist OR not owned by this user
+    return res.status(404).json({ error: "Ledger not found." });
+  }
+
+  // 2) set activeLedgerId on user
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { activeLedgerId: ledgerId },
+    select: { activeLedgerId: true },
+  });
+
+  return res.status(200).json(updated);
+});
+
+router.get("/ledgers/active", requireAuth, async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { activeLedgerId: true },
+  });
+
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  return res.status(200).json({ activeLedgerId: user.activeLedgerId });
+
+});
 export default router;

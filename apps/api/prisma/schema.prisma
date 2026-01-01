@@ -7,28 +7,42 @@ datasource db {
 }
 
 enum Role {
-	USER
-	ADMIN
+  USER
+  ADMIN
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  pwHash    String
-  createdAt DateTime @default(now())
-  role	    Role     @default(USER)
+  id             String   @id @default(cuid())
+  email          String   @unique
+  pwHash         String
+  createdAt      DateTime @default(now())
+  role           Role     @default(USER)
+  ledgers        Ledger[] @relation("ownership")
+  activeLedgerId String?
+  activeLedger   Ledger?  @relation("activeSelection", fields: [activeLedgerId], references: [id])
 
   RefreshTokens RefreshToken[]
 }
 
 model RefreshToken {
-  id	String	@id @default(cuid())
-  tokenHash	String
-  userId	String
-  user		User	@relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt	DateTime @default(now())
-  expiresAt	DateTime
-  revokedAt	DateTime?
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
 
   @@index([userId])
+}
+
+model Ledger {
+  id             String   @id @default(cuid())
+  user           User     @relation("ownership", fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  userId         String
+  createdAt      DateTime @default(now())
+  activeForUsers User[]   @relation("activeSelection")
+
+  @@unique([userId, name])
 }
