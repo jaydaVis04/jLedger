@@ -3,9 +3,14 @@ import { prisma } from "../db/prisma";
 import { app } from "../app";
 
 beforeEach(async () => {
-  // order matters because RefreshToken references User
-  await prisma.refreshToken.deleteMany();
-  await prisma.user.deleteMany();
+  await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "LedgerEntry",
+      "Ledger",
+      "RefreshToken",
+      "User"
+    RESTART IDENTITY CASCADE;
+  `);
 });
 
 afterAll(async () => {
@@ -28,7 +33,6 @@ describe("Auth", () => {
   test("login success -> 200 + accessToken exists", async () => {
     const email = `test_${Date.now()}@test.com`;
 
-    // register first
     await request(app)
       .post("/auth/register")
       .send({ email, password: "password123" });

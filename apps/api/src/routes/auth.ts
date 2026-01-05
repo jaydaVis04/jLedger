@@ -238,4 +238,80 @@ router.get("/ledgers/active", requireAuth, async (req, res) => {
   return res.status(200).json({ activeLedgerId: user.activeLedgerId });
 
 });
-export default router;
+
+router.post("/entries", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+
+  const { type, amount, currency, memo } = req.body ?? {};
+  if (!type || amount === undefined || amount === null || !currency || !memo) {
+    return res.status(400).json({ error: "Missing required fields: type, amount, currency, memo" });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { activeLedgerId: true },
+  });
+
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  if (!user.activeLedgerId) return res.status(409).json({ error: "No active ledger selected" });
+
+  // C5: verify active ledger belongs to this user (no cross-ledger interference)
+  const activeLedger = await prisma.ledger.findFirst({
+    where: { id: user.activeLedgerId, userId },
+    select: { id: true },
+  });
+
+  if (!activeLedger) return res.status(404).json({ error: "Active ledger not found" });
+
+  const entry = await prisma.ledgerEntry.create({
+    data: {
+      ledgerId: activeLedger.id,
+      createdByUserId: userId,
+      type,
+      amount,
+      currency,
+      memo,
+    },
+  });
+
+  return res.status(201).json(entry);
+});
+
+router.get("/entries", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { activeLedgerId: true },
+  });
+
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  if (!user.activeLedgerId) return res.status(409).json({ error: "No active ledger selected" });
+
+  // C5: verify active ledger belongs to this user
+  const activeLedger = await prisma.ledger.findFirst({
+    where: { id: user.activeLedgerId, userId },
+    select: { id: true },
+  });
+
+  if (!activeLedger) return res.status(404).json({ error: "Active ledger not found" });
+
+  const entries = await prisma.ledgerEntry.findMany({
+    where: { ledgerId: activeLedger.id },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      ledgerId: true,
+      createdByUserId: true,
+      createdAt: true,
+      type: true,
+      amount: true,
+      currency: true,
+      memo: true,
+    },
+  });
+
+  return res.status(200).json(entries);
+});
+
+export default router

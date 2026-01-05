@@ -12,14 +12,15 @@ enum Role {
 }
 
 model User {
-  id             String   @id @default(cuid())
-  email          String   @unique
+  id             String        @id @default(cuid())
+  email          String        @unique
   pwHash         String
-  createdAt      DateTime @default(now())
-  role           Role     @default(USER)
-  ledgers        Ledger[] @relation("ownership")
+  createdAt      DateTime      @default(now())
+  role           Role          @default(USER)
+  ledgers        Ledger[]      @relation("ownership")
   activeLedgerId String?
-  activeLedger   Ledger?  @relation("activeSelection", fields: [activeLedgerId], references: [id])
+  activeLedger   Ledger?       @relation("activeSelection", fields: [activeLedgerId], references: [id])
+  ledgerEntries  LedgerEntry[] @relation("EntryCreatedBy")
 
   RefreshTokens RefreshToken[]
 }
@@ -37,12 +38,26 @@ model RefreshToken {
 }
 
 model Ledger {
-  id             String   @id @default(cuid())
-  user           User     @relation("ownership", fields: [userId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  user           User          @relation("ownership", fields: [userId], references: [id], onDelete: Cascade)
   name           String
   userId         String
-  createdAt      DateTime @default(now())
-  activeForUsers User[]   @relation("activeSelection")
+  createdAt      DateTime      @default(now())
+  activeForUsers User[]        @relation("activeSelection")
+  ledgerEntries  LedgerEntry[]
 
   @@unique([userId, name])
+}
+
+model LedgerEntry {
+  id              String   @id @default(cuid())
+  ledgerId        String
+  ledger          Ledger   @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  createdByUserId String
+  createdByUser   User     @relation("EntryCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime @default(now())
+  type            String
+  amount          Decimal
+  currency        String
+  memo            String
 }
