@@ -11,6 +11,19 @@ enum Role {
   ADMIN
 }
 
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum EntryLineSide {
+  DEBIT
+  CREDIT
+}
+
 model User {
   id             String        @id @default(cuid())
   email          String        @unique
@@ -45,19 +58,57 @@ model Ledger {
   createdAt      DateTime      @default(now())
   activeForUsers User[]        @relation("activeSelection")
   ledgerEntries  LedgerEntry[]
+  accounts       Account[]
+  entryLines     EntryLine[]
 
   @@unique([userId, name])
+  @@index([userId])
 }
 
 model LedgerEntry {
-  id              String   @id @default(cuid())
+  id              String      @id @default(cuid())
   ledgerId        String
-  ledger          Ledger   @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  ledger          Ledger      @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
   createdByUserId String
-  createdByUser   User     @relation("EntryCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  createdAt       DateTime @default(now())
+  createdByUser   User        @relation("EntryCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime    @default(now())
   type            String
   amount          Decimal
   currency        String
   memo            String
+  lines           EntryLine[]
+
+  @@unique([id, ledgerId])
+}
+
+model Account {
+  id        String      @id @default(cuid())
+  ledgerId  String
+  ledger    Ledger      @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+  name      String
+  type      AccountType
+  createdAt DateTime    @default(now())
+  lines     EntryLine[]
+
+  @@unique([ledgerId, name])
+  @@unique([id, ledgerId])
+  @@index([ledgerId])
+}
+
+model EntryLine {
+  id            String        @id @default(cuid())
+  ledgerId      String
+  ledger        Ledger        @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  ledgerEntryId String
+  ledgerEntry   LedgerEntry   @relation(fields: [ledgerEntryId, ledgerId], references: [id, ledgerId], onDelete: Restrict)
+  accountId     String
+  account       Account       @relation(fields: [accountId, ledgerId], references: [id, ledgerId], onDelete: Restrict)
+  side          EntryLineSide
+  amount        Decimal
+  currency      String
+  createdAt     DateTime      @default(now())
+
+  @@index([ledgerId])
+  @@index([ledgerEntryId])
+  @@index([accountId])
 }

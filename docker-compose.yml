@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: jledger_pw
       POSTGRES_DB: jledger
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - jledger_db:/var/lib/postgresql/data
 

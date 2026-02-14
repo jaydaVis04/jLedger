@@ -6,6 +6,7 @@ import signAccessToken from "../auth/tokens"
 import { generateRefreshToken, hashRefreshToken } from "../auth/refresh"
 import { requireAuth } from "../middleware/requireAuth"
 import { requireRole } from "../middleware/requireRole"
+import { AccountType } from "@prisma/client";
 
 const router = Router(); // in general wire, to plug into app
 
@@ -17,6 +18,11 @@ const registerSchema = z.object({
 const loginSchema = z.object({
         email:z.string().email(),
         password: z.string().min(8),
+});
+
+const accountCreateSchema = z.object({
+    name: z.string().min(1),
+    type: z.nativeEnum(AccountType),
 });
 
 
@@ -242,35 +248,102 @@ router.get("/ledgers/active", requireAuth, async (req, res) => {
 router.post("/entries", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
 
-  const { type, amount, currency, memo } = req.body ?? {};
-  if (!type || amount === undefined || amount === null || !currency || !memo) {
-    return res.status(400).json({ error: "Missing required fields: type, amount, currency, memo" });
+  const { type, currency, memo, lines } = req.body ?? {};
+
+  // ---------- Basic validation ----------
+  if (!type || !currency || !memo || !Array.isArray(lines) || lines.length === 0) {
+    return res.status(400).json({
+      error: "Missing required fields: type, currency, memo, lines (non-empty array required)",
+    });
   }
 
+  // ---------- Validate line structure ----------
+  for (const line of lines) {
+    if (
+      !line.accountId ||
+      !line.side ||
+      !line.amount ||
+      Number(line.amount) <= 0 ||
+      !["DEBIT", "CREDIT"].includes(line.side)
+    ) {
+      return res.status(400).json({
+        error: "Each line must include: accountId, side (DEBIT|CREDIT), positive amount",
+      });
+    }
+  }
+
+  // ---------- Enforce debit = credit ----------
+  let debitTotal = 0;
+  let creditTotal = 0;
+
+  for (const line of lines) {
+    const amt = Number(line.amount);
+
+    if (line.side === "DEBIT") debitTotal += amt;
+    if (line.side === "CREDIT") creditTotal += amt;
+  }
+
+  if (debitTotal !== creditTotal) {
+    return res.status(400).json({
+      error: "Debits must equal credits",
+    });
+  }
+
+  // ---------- Verify active ledger ----------
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { activeLedgerId: true },
   });
 
   if (!user) return res.status(401).json({ error: "Unauthorized" });
-  if (!user.activeLedgerId) return res.status(409).json({ error: "No active ledger selected" });
+  if (!user.activeLedgerId)
+    return res.status(409).json({ error: "No active ledger selected" });
 
-  // C5: verify active ledger belongs to this user (no cross-ledger interference)
   const activeLedger = await prisma.ledger.findFirst({
     where: { id: user.activeLedgerId, userId },
     select: { id: true },
   });
 
-  if (!activeLedger) return res.status(404).json({ error: "Active ledger not found" });
+  if (!activeLedger)
+    return res.status(404).json({ error: "Active ledger not found" });
 
+  // ---------- Verify all accounts belong to this ledger ----------
+  const accountIds = lines.map((l: any) => l.accountId);
+
+  const accounts = await prisma.account.findMany({
+    where: {
+      id: { in: accountIds },
+      ledgerId: activeLedger.id,
+    },
+    select: { id: true },
+  });
+
+  if (accounts.length !== accountIds.length) {
+    return res.status(404).json({
+      error: "One or more accounts not found in active ledger",
+    });
+  }
+
+  // ---------- Create entry + lines (atomic nested write) ----------
   const entry = await prisma.ledgerEntry.create({
     data: {
       ledgerId: activeLedger.id,
       createdByUserId: userId,
       type,
-      amount,
       currency,
       memo,
+      lines: {
+        create: lines.map((l: any) => ({
+          ledgerId: activeLedger.id,
+          accountId: l.accountId,
+          side: l.side,
+          amount: l.amount,
+          currency,
+        })),
+      },
+    },
+    include: {
+      lines: true,
     },
   });
 
@@ -312,6 +385,93 @@ router.get("/entries", requireAuth, async (req, res) => {
   });
 
   return res.status(200).json(entries);
+});
+
+router.post("/accounts", requireAuth, async (req, res) => {
+    const userId = (req as any).userId as string;
+
+    const parsed = accountCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ error: "Missing or invalid required fields: name, type" });
+    }
+    
+    const { name, type } = parsed.data;
+
+    // find users activeledgerid
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { activeLedgerId: true }
+    });
+
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    if (!user.activeLedgerId) return res.status(409).json({ error: "No active ledger selected" });
+
+    // belongs to user?
+    const activeLedger = await prisma.ledger.findFirst({
+        where: { id: user.activeLedgerId, userId },
+        select: { id: true },
+    });
+
+    if (!activeLedger) return res.status(404).json({ error: "Active ledger not found" });
+
+    try {
+        const createdAccount = await prisma.account.create({
+            data: {
+                ledgerId: activeLedger.id,
+                name,
+                type,
+            },
+            select : {
+                id: true,
+                ledgerId: true,
+                name: true,
+                type: true,
+                createdAt: true,
+            },
+        });
+
+        return res.status(201).json(createdAccount);
+    } catch (err: any) {
+        // unique per ledger constraint
+        if (err?.code == "P2002") {
+            return res.status(409).json({ error: "Account name already exists in this ledger!" });
+        }
+        console.error("CREATE ACCOUNT ERROR:", err);
+        return res.status(500).json({ error: "Server error." });
+    }
+});
+
+router.get("/accounts", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { activeLedgerId: true },
+    });
+
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    if (!user.activeLedgerId) return res.status(409).json({ error: "No active ledger selected" });
+
+    // verify active ledger belongs to this user
+    const activeLedger = await prisma.ledger.findFirst({
+      where: { id: user.activeLedgerId, userId },
+      select: { id: true },
+    });
+
+    if (!activeLedger) return res.status(404).json({ error: "Active ledger not found" });
+
+    const accounts = await prisma.account.findMany({
+      where: { ledgerId: activeLedger.id },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, ledgerId: true, name: true, type: true, createdAt: true },
+    });
+
+    return res.status(200).json(accounts);
+  } catch (err) {
+    console.error("LIST ACCOUNTS ERROR:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
 });
 
 export default router
