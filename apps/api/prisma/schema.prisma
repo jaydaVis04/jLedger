@@ -78,7 +78,7 @@ model LedgerEntry {
   memo            String
   lines           EntryLine[]
 
-  @@unique([id, ledgerId])
+  @@unique([id, ledgerId])  
 }
 
 model Account {
@@ -97,18 +97,19 @@ model Account {
 
 model EntryLine {
   id            String        @id @default(cuid())
+
   ledgerId      String
-  ledger        Ledger        @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  ledger        Ledger        @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+
   ledgerEntryId String
-  ledgerEntry   LedgerEntry   @relation(fields: [ledgerEntryId, ledgerId], references: [id, ledgerId], onDelete: Restrict)
+  ledgerEntry   LedgerEntry   @relation(fields: [ledgerEntryId, ledgerId], references: [id, ledgerId], onDelete: Cascade)
+
   accountId     String
-  account       Account       @relation(fields: [accountId, ledgerId], references: [id, ledgerId], onDelete: Restrict)
+  account       Account       @relation(fields: [accountId, ledgerId], references: [id, ledgerId], onDelete: Cascade)
+
   side          EntryLineSide
   amount        Decimal
   currency      String
-  createdAt     DateTime      @default(now())
 
   @@index([ledgerId])
-  @@index([ledgerEntryId])
-  @@index([accountId])
 }
